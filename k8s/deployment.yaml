@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audio-stream-websocket
+  labels:
+    app: audio-stream-websocket
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: audio-stream-websocket
+  template:
+    metadata:
+      labels:
+        app: audio-stream-websocket
+    spec:
+      containers:
+      - name: audio-stream-websocket
+        image: YOUR_ECR_REPO/audio-stream-websocket:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8765
+          name: websocket
+        env:
+        - name: WEBSOCKET_HOST
+          value: "0.0.0.0"
+        - name: WEBSOCKET_PORT
+          value: "8765"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          tcpSocket:
+            port: 8765
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 8765
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
