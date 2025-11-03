@@ -1,0 +1,50 @@
+Uttam Giri
+(512) 576-9171 | uttamgiri32@gmail.com
+
+Professional Summary
+Innovative IT Specialist / Developer/ AI & Cloud Architect with 15+ years of experience in federal and private-sector software engineering, specializing in cloud-native modernization, DevOps automation, cybersecurity, and applied AI research. Proven success in advising senior leadership, driving secure modernization, and implementing enterprise-wide cloud and AI solutions aligned with federal mandates. Experienced in leading cross-functional Agile teams, formulating technical standards, and ensuring compliance with federal cybersecurity and data governance policies.
+
+Key Skills
+• Cloud & DevOps: AWS, OpenShift ECP, EKS, Helm, Argo CD, GitHub Actions, Jenkins
+• Security & Architecture: Zero Trust, Istio, mTLS/TLS, OAuth 2.0, HashiCorp Vault, PingFederate
+• Development: Java (Spring Boot), Python, React, Angular, C#, MongoDB, Oracle, Postgres
+• AI / Research: LangChain, Crew AI, OpenAI SDK, OpenSearch, RAG, AWS Bedrock, Hugging Face, PyCharm, LLM prototyping, Autogen, MCP
+• Monitoring & Performance: AppDynamics, Splunk, Prometheus, Kibana, Jaeger, Kiali
+
+Experience Highlights
+
+Department of the Treasury – Internal Revenue Service (IRS)
+IT Specialist (APPSW / DevOps / Cloud / Security) October 2023 – Present | 40 hrs/week
+• Led enterprise cloud-native modernization, migrating legacy systems to AWS and OpenShift ECP to support Treasury-wide digital transformation.
+• Architected secure microservices using Spring Boot and Istio with end-to-end mTLS, OAuth 2.0, and certificate lifecycle automation via Vault.
+• Design and Implemented CI/CD modernization, transitioning from Jenkins to GitHub Actions and establishing GitOps governance using Argo CD and Helm.
+• Advised senior executives on secure AI adoption and automation initiatives, aligning with Executive Orders on trustworthy AI and federal cloud policy.
+• Conducted personal applied AI research on LLM-powered chat box using LangChain and OpenSearch, Pinecone, RAG pipeline and memory. Research on Bedrock, Hugging Face, CrewAI, and MCP to showcase automation potential for IRS business processes.
+
+U.S. Government Publishing Office (GPO)
+IT Specialist (Applications Software) - March 2023 – October 2023 | 40 hrs/week
+• Automated patch management for hybrid Linux/Windows infrastructure, improving compliance by 35%.
+• Developed legislative reporting tools using Python and Java frameworks, streamlining data delivery to congressional stakeholders.
+• Collaborated with OCIO and security teams to enforce multi-factor and certificate-based authentication standards.
+
+Federal Aviation Administration (FAA) - Contractor
+Architect / Full Stack Developer - January 2021 – March 2023 | 40 hrs/week
+• Designed and deployed AWS microservices and server-less workloads reducing latency by 40% and costs by 30%.
+• Directed Agile teams through sprint planning, backlog refinement, and technical reviews.
+• Integrated performance monitoring (AppDynamics, Prometheus) to enable predictive scaling.
+• Delivered modernization strategies aligned with FAA cloud security baselines.
+
+Infosys / Deloitte / Nagarro / CSX / Synergy Tech / Transmodus
+Technology Lead / Senior Developer - January 2010 – December 2020 | 40 hrs/week
+• Led modernization of payment and logistics systems using Java, Spring Boot, Angular/React, and Oracle/DB2.
+• Championed CI/CD automation and containerization (Docker, Kubernetes), cutting release cycles by 50%.
+• Delivered multi-agency integration solutions ensuring secure data exchange across government clients.
+
+Certifications
+• AWS Certified Solutions Architect – Associate (2025)
+• AWS Certified AI Practitioner (2025)
+
+Education / Clearance & Status
+• Bachelor of Engineering – Computer Engineering
+• Public Trust – Active / Eligible
+

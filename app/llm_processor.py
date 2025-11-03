@@ -65,11 +65,36 @@ class LLMProcessor:
                     traceback.print_exc()
                     self.client = None
     
-    def process_text(self, text: str, system_prompt: str = "You are a helpful assistant.") -> Optional[str]:
+    def _load_resume(self) -> str:
+        """Load resume content from file"""
+        try:
+            import os
+            resume_path = os.path.join(os.path.dirname(__file__), 'resume.txt')
+            if os.path.exists(resume_path):
+                with open(resume_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+        except Exception as e:
+            print(f"LLM: Warning - Could not load resume: {e}")
+        return ""
+    
+    def process_text(self, text: str, system_prompt: Optional[str] = None) -> Optional[str]:
         """
         Send text to LLM and get response
         Returns LLM's response or None if error
         """
+        # Load resume if not provided with system prompt
+        if system_prompt is None:
+            resume_content = self._load_resume()
+            if resume_content:
+                system_prompt = f"""You are a helpful assistant representing Uttam Giri, an IT Specialist / Developer / AI & Cloud Architect.
+
+Here is Uttam's professional background:
+
+{resume_content}
+
+When asked about Uttam, his experience, skills, background, or any professional questions, provide accurate and helpful responses based on the information above. For general questions, provide helpful assistance."""
+            else:
+                system_prompt = "You are a helpful assistant."
         # If client is None, try to reinitialize one more time
         if not self.client:
             print("LLM: Client is None, attempting to reinitialize...")

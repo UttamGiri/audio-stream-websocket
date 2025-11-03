@@ -69,6 +69,7 @@ class Transcriber:
         self.results_queue = asyncio.Queue()
         self.audio_buffer = []
         self.is_streaming = False
+        self._result_processor_task = None  # Track the background task
     
     def start_transcription(self, language_code: str = 'en-US') -> Optional[dict]:
         """Start a new transcription session"""
@@ -86,6 +87,34 @@ class Transcriber:
     async def _start_stream_async(self):
         """Start the async transcription stream"""
         try:
+            # If stream is already running, don't start a new one
+            if self.is_streaming and self.stream:
+                print("Stream already running, skipping start")
+                return
+            
+            # Clean up any existing stream first
+            if self.stream:
+                print("Closing existing stream before starting new one...")
+                self.is_streaming = False
+                self.stream = None
+            
+            if self._result_processor_task and not self._result_processor_task.done():
+                print("Cancelling old result processor task...")
+                self._result_processor_task.cancel()
+                try:
+                    # Wait a bit for task to cancel, but don't wait too long
+                    await asyncio.wait_for(self._result_processor_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                self._result_processor_task = None
+            
+            # Clear results queue to remove any stale results
+            while not self.results_queue.empty():
+                try:
+                    self.results_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            
             if not self.transcribe_client:
                 print("Transcribe client not initialized, cannot start stream")
                 return
@@ -101,7 +130,7 @@ class Transcriber:
                 print("AWS Transcribe stream connection established!")
                 
                 # Start background task to process results
-                asyncio.create_task(self._process_stream_results())
+                self._result_processor_task = asyncio.create_task(self._process_stream_results())
                 print("Started background task to receive transcription results")
                 
                 self.is_streaming = True
@@ -137,14 +166,26 @@ class Transcriber:
                                     # Final result - also add to buffer
                                     self.transcription_buffer.append(transcript)
         except Exception as e:
-            print(f"Error processing stream results: {e}")
+            error_msg = str(e).lower()
+            if "timeout" in error_msg or "no new audio" in error_msg:
+                print(f"⚠️  Transcribe stream timeout in result processor (expected between batches)")
+                # Reset stream state so it can be reopened for next batch
+                self.is_streaming = False
+                self.stream = None
+                self._result_processor_task = None
+            else:
+                print(f"Error processing stream results: {e}")
+                # Reset stream state on any error
+                self.is_streaming = False
+                self.stream = None
+                self._result_processor_task = None
     
     async def send_audio_chunk_async(self, audio_chunk: bytes) -> Optional[str]:
         """
-        Send audio chunk to AWS Transcribe Streaming (async)
-        Continuously polls the results queue to return partial/final transcripts
+        Send audio chunk to AWS Transcribe Streaming and get transcription results
         """
         try:
+            # Start stream if not already running
             if not self.is_streaming:
                 print(f"Starting transcribe stream for audio chunk of {len(audio_chunk)} bytes")
                 await self._start_stream_async()
@@ -155,19 +196,19 @@ class Transcriber:
 
             if self.stream.input_stream:
                 # AWS Transcribe has frame size limits - chunk large audio into smaller pieces
-                max_frame_size = 8192  # 8KB max per frame (AWS limit is typically 10KB)
+                max_frame_size = 8192  # 8KB max per frame
                 
                 # Start collecting transcripts in background
                 transcripts = []
-                partial_transcript = None  # Track current partial result (accessible outside function)
-                collection_done = asyncio.Event()
+                partial_transcript = None
                 
                 async def collect_transcripts():
-                    """Collect transcripts while sending audio - handles partial vs final correctly"""
+                    """Collect transcripts while sending audio"""
                     nonlocal transcripts, partial_transcript
-                    max_wait_time = 15.0  # Increased wait time for finalization
+                    max_wait_time = 8.0
                     start_time = asyncio.get_event_loop().time()
                     last_transcript_time = start_time
+                    no_final_timeout = 2.0
                     
                     print(f"Starting transcript collection (waiting up to {max_wait_time}s)...")
                     
@@ -176,76 +217,90 @@ class Transcriber:
                         if remaining_time <= 0:
                             break
                         
-                        # If no transcripts for 3 seconds after getting final ones, assume done
-                        # Or if we have partial but no final for 5 seconds, use partial
                         current_time = asyncio.get_event_loop().time()
-                        if transcripts and (current_time - last_transcript_time > 3.0):
-                            print("No new final transcripts for 3s, assuming complete")
+                        
+                        # If we have final transcripts, wait 0.5s more
+                        if transcripts and (current_time - last_transcript_time > 0.5):
+                            print(f"Got final transcripts, waiting 0.5s more...")
+                            await asyncio.sleep(0.5)
                             break
-                        elif partial_transcript and not transcripts and (current_time - start_time > 5.0):
-                            print("No final transcripts after 5s, will use partial")
+                        elif partial_transcript and not transcripts and (current_time - start_time > no_final_timeout):
+                            print(f"No final transcripts after {no_final_timeout}s, will use partial")
                             break
                         
                         try:
                             result = await asyncio.wait_for(
                                 self.results_queue.get(),
-                                timeout=min(0.5, remaining_time)
+                                timeout=min(0.3, remaining_time)
                             )
                             
-                            # Result is now a tuple: (transcript, is_partial)
                             transcript, is_partial = result
                             
                             if transcript:
                                 if is_partial:
-                                    # Partial result - replace current partial (don't append)
                                     partial_transcript = transcript
                                     print(f"Partial transcript: {transcript}")
                                 else:
-                                    # Final result - append to final transcripts
                                     transcripts.append(transcript)
-                                    partial_transcript = None  # Clear partial after final
+                                    partial_transcript = None
                                     last_transcript_time = asyncio.get_event_loop().time()
                                     print(f"Final transcript: {transcript}")
-                                    # Reset timer when we get final results
-                                    start_time = asyncio.get_event_loop().time()
                         except asyncio.TimeoutError:
-                            # Keep waiting if we haven't gotten any final transcripts yet
-                            if not transcripts:
+                            if transcripts:
+                                if (asyncio.get_event_loop().time() - last_transcript_time) > 0.5:
+                                    break
                                 continue
-                            # Got some final transcripts, wait a bit more
-                            await asyncio.sleep(0.2)
-                    
-                    collection_done.set()
+                            if not transcripts and not partial_transcript:
+                                continue
+                            if partial_transcript:
+                                if (asyncio.get_event_loop().time() - start_time) > no_final_timeout:
+                                    break
+                                continue
                 
                 # Start collection task
                 collection_task = asyncio.create_task(collect_transcripts())
                 
                 # Send audio frames
-                if len(audio_chunk) > max_frame_size:
-                    print(f"Large audio chunk ({len(audio_chunk)} bytes), splitting into frames of {max_frame_size} bytes")
-                    frame_count = (len(audio_chunk) + max_frame_size - 1) // max_frame_size
-                    for i in range(0, len(audio_chunk), max_frame_size):
-                        chunk_frame = audio_chunk[i:i+max_frame_size]
-                        frame_num = i // max_frame_size + 1
-                        print(f"Sending frame {frame_num}/{frame_count} ({len(chunk_frame)} bytes)")
-                        await self.stream.input_stream.send_audio_event(audio_chunk=chunk_frame)
-                        # Small delay between frames to keep stream alive and avoid overwhelming
-                        await asyncio.sleep(0.05)
-                    print(f"All {len(audio_chunk)} bytes sent successfully to AWS Transcribe")
-                else:
-                    print(f"Sending {len(audio_chunk)} bytes to AWS Transcribe Streaming")
-                    await self.stream.input_stream.send_audio_event(audio_chunk=audio_chunk)
-                    print(f"Audio chunk sent successfully to AWS Transcribe")
+                try:
+                    if len(audio_chunk) > max_frame_size:
+                        print(f"Large audio chunk ({len(audio_chunk)} bytes), splitting into frames...")
+                        for i in range(0, len(audio_chunk), max_frame_size):
+                            chunk_frame = audio_chunk[i:i+max_frame_size]
+                            await self.stream.input_stream.send_audio_event(audio_chunk=chunk_frame)
+                            await asyncio.sleep(0.05)  # Small delay between frames
+                        print(f"All {len(audio_chunk)} bytes sent to AWS Transcribe")
+                    else:
+                        print(f"Sending {len(audio_chunk)} bytes to AWS Transcribe")
+                        await self.stream.input_stream.send_audio_event(audio_chunk=audio_chunk)
+                        print(f"Audio chunk sent successfully")
+                except Exception as send_error:
+                    error_msg = str(send_error).lower()
+                    if "timeout" in error_msg or "no new audio" in error_msg:
+                        print(f"⚠️  Transcribe stream timed out - resetting")
+                        self.is_streaming = False
+                        self.stream = None
+                        if self._result_processor_task:
+                            self._result_processor_task.cancel()
+                            self._result_processor_task = None
+                        if not collection_task.done():
+                            collection_task.cancel()
+                        return None
+                    else:
+                        raise
                 
-                # Wait for collection to complete (with longer timeout for finalization)
-                await collection_task
+                # Wait for collection to complete
+                try:
+                    await collection_task
+                except asyncio.CancelledError:
+                    print("Collection task cancelled")
+                    return None
                 
+                # Return collected transcripts
                 if transcripts:
                     combined_transcript = " ".join(transcripts)
                     print(f"Final transcription: {combined_transcript}")
                     return combined_transcript
                 elif partial_transcript:
-                    # If we didn't get final transcripts but have a partial, use it as fallback
                     print(f"No final transcripts, using last partial: {partial_transcript}")
                     return partial_transcript
                 else:

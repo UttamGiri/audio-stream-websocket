@@ -48,6 +48,9 @@ async def process_audio_async(chunk: bytes) -> bytes:
     2. Process text with LLM
     3. Convert LLM response to audio (Amazon Polly)
     """
+    import time
+    pipeline_start = time.time()
+    
     # Initialize services
     _initialize_services()
     _start_session_if_needed()
@@ -58,9 +61,11 @@ async def process_audio_async(chunk: bytes) -> bytes:
             print("Error: Transcriber is None!")
             return b''
         
+        transcribe_start = time.time()
         try:
             transcribed_text = await _transcriber.send_audio_chunk_async(chunk)
-            print(f"Transcriber returned: {transcribed_text} (type: {type(transcribed_text)})")
+            transcribe_time = time.time() - transcribe_start
+            print(f"⏱️  Transcription took {transcribe_time:.2f}s - Result: {transcribed_text}")
         except Exception as e:
             print(f"Error in transcription (continuing): {e}")
             transcribed_text = None
@@ -76,36 +81,42 @@ async def process_audio_async(chunk: bytes) -> bytes:
                 print("No transcription available, skipping LLM and Polly steps")
                 return b''
         
-        print(f"Transcribed: {transcribed_text}")
-        
         # Step 2: Process with LLM
         if not _llm_processor:
             print("Error: LLM Processor is None!")
             return b''
         
-        print(f"Calling LLM with text: {transcribed_text[:50]}...")
+        llm_start = time.time()
+        print(f"🤖 Calling LLM with text: {transcribed_text[:50]}...")
         llm_response = _llm_processor.process_text(transcribed_text)
-        print(f"LLM returned: {llm_response} (type: {type(llm_response)})")
+        llm_time = time.time() - llm_start
+        print(f"⏱️  LLM processing took {llm_time:.2f}s - Response: {llm_response[:100] if llm_response else 'None'}...")
         
         if not llm_response:
             return b''
         
-        print(f"LLM Response: {llm_response}")
-        
         # Step 3: Convert LLM response to audio
         if not _polly_synthesizer:
             return b''
+        
+        polly_start = time.time()
         audio_output = _polly_synthesizer.synthesize_speech(llm_response)
+        polly_time = time.time() - polly_start
+        total_time = time.time() - pipeline_start
         
         if audio_output:
-            print(f"Generated audio: {len(audio_output)} bytes")
+            print(f"⏱️  Polly synthesis took {polly_time:.2f}s - Generated {len(audio_output)} bytes")
+            print(f"✅ Total pipeline time: {total_time:.2f}s (Transcribe: {transcribe_time:.2f}s, LLM: {llm_time:.2f}s, Polly: {polly_time:.2f}s)")
         else:
             print("Failed to generate audio from LLM response")
         
         return audio_output if audio_output else b''
     
     except Exception as e:
-        print(f"Error in audio processing pipeline: {e}")
+        total_time = time.time() - pipeline_start
+        print(f"❌ Error in audio processing pipeline after {total_time:.2f}s: {e}")
+        import traceback
+        traceback.print_exc()
         return b''
 
 def process_audio(chunk: bytes) -> bytes:
