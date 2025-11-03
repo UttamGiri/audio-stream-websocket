@@ -1,0 +1,18 @@
+{
+    "python.defaultInterpreterPath": "python3",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/app"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/app"
+    ],
+    "debug.allowBreakpointsEverywhere": true,
+    "python.debugging.justMyCode": false,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true
+    }
+}
+

@@ -1,0 +1,126 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: WebSocket Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/app/server.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "python": "${command:python.interpreterPath}",
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "WEBSOCKET_HOST": "0.0.0.0",
+                "WEBSOCKET_PORT": "8765"
+            },
+            "cwd": "${workspaceFolder}",
+            "debugOptions": [
+                "RedirectOutput"
+            ]
+        },
+        {
+            "name": "Python: Test Client",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/test_client.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "python": "${command:python.interpreterPath}",
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "debugOptions": [
+                "RedirectOutput"
+            ]
+        },
+        {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "python": "${command:python.interpreterPath}",
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "debugOptions": [
+                "RedirectOutput"
+            ]
+        },
+        {
+            "name": "Python: Audio Processor",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.audio_processor",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "python": "${command:python.interpreterPath}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: Attach (Local)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Attach (Docker)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app/app"
+                },
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "justMyCode": false,
+            "debugOptions": [
+                "RedirectOutput"
+            ]
+        }
+    ]
+}
+

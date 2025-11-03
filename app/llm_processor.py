@@ -1,27 +1,105 @@
 import os
 from typing import Optional
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+print("LLM: Module llm_processor.py imported")
 
 class LLMProcessor:
     """Handles LLM text processing using OpenAI"""
     
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
+        print("LLM: Initializing LLMProcessor...")
+        # Try to load .env file (for local development)
+        # In Docker, env vars are already set via --env-file
+        load_dotenv(override=False)
+        
+        # Clear proxy settings that might cause issues with OpenAI client
+        proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy']
+        for proxy_var in proxy_vars:
+            if proxy_var in os.environ:
+                del os.environ[proxy_var]
+                print(f"LLM: Removed {proxy_var} from environment")
+        
+        # Get API key from environment (works in both local and Docker)
+        api_key = os.environ.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        
+        print(f"LLM: API key check - found: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+        
         if not api_key:
             print("Warning: OPENAI_API_KEY not found in environment")
+            print(f"Debug: Checking env vars...")
+            # Show all env vars (masked) for debugging
+            env_keys = list(os.environ.keys())
+            openai_keys = [k for k in env_keys if 'OPENAI' in k.upper() or 'OPEN' in k.upper()]
+            print(f"Debug: Total env vars: {len(env_keys)}")
+            if openai_keys:
+                print(f"Debug: Found env vars containing 'OPEN': {openai_keys}")
+                for key in openai_keys:
+                    val = os.environ.get(key, '')
+                    print(f"Debug: {key} = {'SET' if val else 'EMPTY'} (length: {len(val)})")
+            else:
+                print("Debug: No environment variables found with 'OPEN' in name")
+                # Show first 20 env var names for debugging
+                print(f"Debug: Sample env vars: {list(env_keys)[:20]}")
             self.client = None
         else:
-            self.client = OpenAI(api_key=api_key)
+            try:
+                # Explicitly disable proxies by passing http_client without proxy config
+                import httpx
+                http_client = httpx.Client(timeout=60.0)
+                self.client = OpenAI(api_key=api_key, http_client=http_client)
+                print(f"LLM: OpenAI client initialized successfully (key: {api_key[:10]}...)")
+            except Exception as e:
+                print(f"LLM: Error initializing OpenAI client: {e}")
+                # Fallback: try without explicit http_client
+                try:
+                    print("LLM: Trying without explicit http_client...")
+                    self.client = OpenAI(api_key=api_key)
+                    print(f"LLM: OpenAI client initialized (fallback method)")
+                except Exception as e2:
+                    print(f"LLM: Fallback also failed: {e2}")
+                    import traceback
+                    traceback.print_exc()
+                    self.client = None
     
     def process_text(self, text: str, system_prompt: str = "You are a helpful assistant.") -> Optional[str]:
         """
         Send text to LLM and get response
         Returns LLM's response or None if error
         """
+        # If client is None, try to reinitialize one more time
         if not self.client:
-            return "Error: LLM not configured. Please set OPENAI_API_KEY."
+            print("LLM: Client is None, attempting to reinitialize...")
+            # Clear proxy vars again
+            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy']
+            for proxy_var in proxy_vars:
+                if proxy_var in os.environ:
+                    del os.environ[proxy_var]
+            
+            # Try to get API key and create client
+            api_key = os.environ.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+            if api_key:
+                try:
+                    # Explicitly disable proxies by passing http_client without proxy config
+                    import httpx
+                    http_client = httpx.Client(timeout=60.0)
+                    self.client = OpenAI(api_key=api_key, http_client=http_client)
+                    print(f"LLM: Client reinitialized successfully in process_text")
+                except Exception as e:
+                    print(f"LLM: Failed to reinitialize client: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            if not self.client:
+                error_msg = "Error: LLM not configured. Please set OPENAI_API_KEY."
+                print(f"LLM: {error_msg}")
+                return error_msg
         
         try:
+            print(f"LLM: Sending request to OpenAI with text: {text[:50]}...")
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -31,8 +109,16 @@ class LLMProcessor:
                 temperature=0.7,
                 max_tokens=500
             )
-            return response.choices[0].message.content
+            if response.choices and len(response.choices) > 0:
+                result = response.choices[0].message.content
+                print(f"LLM: Received response: {result[:50] if result else 'None'}...")
+                return result
+            else:
+                print("LLM: No response choices returned")
+                return None
         except Exception as e:
-            print(f"Error processing text with LLM: {e}")
+            print(f"LLM: Error processing text with LLM: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 

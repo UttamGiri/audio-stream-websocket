@@ -1,4 +1,7 @@
 websockets==11.0.3
 python-dotenv==1.0.1
 boto3==1.34.0
-openai==1.12.0
+openai>=1.35.0
+debugpy==1.8.17
+amazon-transcribe==0.6.4
+pydub==0.25.1

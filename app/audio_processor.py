@@ -16,15 +16,22 @@ def _initialize_services():
     
     if _transcriber is None:
         _transcriber = Transcriber()
-        print("Transcriber initialized")
+        print(f"Transcriber initialized: {_transcriber is not None}")
     
     if _llm_processor is None:
+        print("About to create LLMProcessor instance...")
         _llm_processor = LLMProcessor()
-        print("LLM Processor initialized")
+        print(f"LLM Processor initialized: {_llm_processor is not None}, client: {_llm_processor.client is not None if _llm_processor else 'N/A'}")
+    
+    # If LLMProcessor exists but client is None, try to reinitialize (in case env vars weren't loaded before)
+    if _llm_processor and _llm_processor.client is None:
+        print("WARNING: LLMProcessor.client is None - trying to reinitialize with current environment...")
+        _llm_processor = LLMProcessor()  # Reinitialize - maybe env vars are available now
+        print(f"LLM Processor reinitialized: client={_llm_processor.client is not None if _llm_processor else 'N/A'}")
     
     if _polly_synthesizer is None:
         _polly_synthesizer = PollySynthesizer()
-        print("Polly Synthesizer initialized")
+        print(f"Polly Synthesizer initialized: {_polly_synthesizer is not None}")
 
 def _start_session_if_needed():
     """Start transcription session if not already started"""
@@ -34,9 +41,9 @@ def _start_session_if_needed():
         _transcription_session = _transcriber.start_transcription()
         print("Transcription session started")
 
-def process_audio(chunk: bytes) -> bytes:
+async def process_audio_async(chunk: bytes) -> bytes:
     """
-    Complete audio processing pipeline:
+    Complete audio processing pipeline (async version):
     1. Transcribe audio to text (AWS Transcribe)
     2. Process text with LLM
     3. Convert LLM response to audio (Amazon Polly)
@@ -48,19 +55,37 @@ def process_audio(chunk: bytes) -> bytes:
     try:
         # Step 1: Transcribe audio to text
         if not _transcriber:
+            print("Error: Transcriber is None!")
             return b''
-        transcribed_text = _transcriber.send_audio_chunk(chunk)
         
-        # If no transcription yet, return empty
+        try:
+            transcribed_text = await _transcriber.send_audio_chunk_async(chunk)
+            print(f"Transcriber returned: {transcribed_text} (type: {type(transcribed_text)})")
+        except Exception as e:
+            print(f"Error in transcription (continuing): {e}")
+            transcribed_text = None
+        
+        # If no transcription yet, check if we should skip or use test mode
         if not transcribed_text:
-            return b''
+            # Test mode: bypass transcription for testing LLM/Polly
+            test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
+            if test_mode:
+                print("TEST_MODE: Using placeholder text instead of transcription")
+                transcribed_text = "Hello, this is a test message."
+            else:
+                print("No transcription available, skipping LLM and Polly steps")
+                return b''
         
         print(f"Transcribed: {transcribed_text}")
         
         # Step 2: Process with LLM
         if not _llm_processor:
+            print("Error: LLM Processor is None!")
             return b''
+        
+        print(f"Calling LLM with text: {transcribed_text[:50]}...")
         llm_response = _llm_processor.process_text(transcribed_text)
+        print(f"LLM returned: {llm_response} (type: {type(llm_response)})")
         
         if not llm_response:
             return b''
@@ -82,6 +107,24 @@ def process_audio(chunk: bytes) -> bytes:
     except Exception as e:
         print(f"Error in audio processing pipeline: {e}")
         return b''
+
+def process_audio(chunk: bytes) -> bytes:
+    """
+    Sync wrapper for process_audio_async
+    This is kept for backward compatibility but should use async version
+    """
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, we need to handle this differently
+            # For now, return empty - should use async version
+            print("Warning: process_audio called from async context. Use process_audio_async instead.")
+            return b''
+        else:
+            return loop.run_until_complete(process_audio_async(chunk))
+    except RuntimeError:
+        return asyncio.run(process_audio_async(chunk))
 
 def reset_session():
     """Reset the transcription session for a new conversation"""
