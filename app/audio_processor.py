@@ -65,7 +65,9 @@ async def process_audio_async(chunk: bytes) -> bytes:
         try:
             transcribed_text = await _transcriber.send_audio_chunk_async(chunk)
             transcribe_time = time.time() - transcribe_start
-            print(f"⏱️  Transcription took {transcribe_time:.2f}s - Result: {transcribed_text}")
+            # Only log transcription if it's meaningful
+            if transcribed_text:
+                print(f"📝 Transcribed: {transcribed_text}")
         except Exception as e:
             print(f"Error in transcription (continuing): {e}")
             transcribed_text = None
@@ -87,10 +89,12 @@ async def process_audio_async(chunk: bytes) -> bytes:
             return b''
         
         llm_start = time.time()
-        print(f"🤖 Calling LLM with text: {transcribed_text[:50]}...")
         llm_response = _llm_processor.process_text(transcribed_text)
         llm_time = time.time() - llm_start
-        print(f"⏱️  LLM processing took {llm_time:.2f}s - Response: {llm_response[:100] if llm_response else 'None'}...")
+        
+        # Only log final LLM response
+        if llm_response:
+            print(f"🤖 LLM Response: {llm_response}")
         
         if not llm_response:
             return b''
@@ -102,11 +106,10 @@ async def process_audio_async(chunk: bytes) -> bytes:
         polly_start = time.time()
         audio_output = _polly_synthesizer.synthesize_speech(llm_response)
         polly_time = time.time() - polly_start
-        total_time = time.time() - pipeline_start
         
         if audio_output:
-            print(f"⏱️  Polly synthesis took {polly_time:.2f}s - Generated {len(audio_output)} bytes")
-            print(f"✅ Total pipeline time: {total_time:.2f}s (Transcribe: {transcribe_time:.2f}s, LLM: {llm_time:.2f}s, Polly: {polly_time:.2f}s)")
+            total_time = time.time() - pipeline_start
+            print(f"✅ Response ready ({len(audio_output)} bytes, {total_time:.1f}s)")
         else:
             print("Failed to generate audio from LLM response")
         

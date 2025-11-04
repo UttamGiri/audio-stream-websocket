@@ -168,14 +168,14 @@ class Transcriber:
         except Exception as e:
             error_msg = str(e).lower()
             if "timeout" in error_msg or "no new audio" in error_msg:
-                print(f"⚠️  Transcribe stream timeout in result processor (expected between batches)")
-                # Reset stream state so it can be reopened for next batch
-                self.is_streaming = False
-                self.stream = None
+                # Timeout is expected between batches - keep stream open for next batch
+                # Don't reset stream state - it will be reused
+                # Just restart the result processor task
                 self._result_processor_task = None
+                # Stream stays open, we'll restart the processor task when new audio arrives
             else:
                 print(f"Error processing stream results: {e}")
-                # Reset stream state on any error
+                # Reset stream state on actual errors only
                 self.is_streaming = False
                 self.stream = None
                 self._result_processor_task = None
@@ -186,13 +186,18 @@ class Transcriber:
         """
         try:
             # Start stream if not already running
-            if not self.is_streaming:
+            if not self.is_streaming or not self.stream:
                 print(f"Starting transcribe stream for audio chunk of {len(audio_chunk)} bytes")
                 await self._start_stream_async()
 
-            if not self.stream or not self.is_streaming:
+            if not self.stream:
                 print("Stream not available - cannot send to AWS Transcribe")
                 return None
+            
+            # Restart result processor task if it was stopped (e.g., after timeout)
+            if not self._result_processor_task or self._result_processor_task.done():
+                self._result_processor_task = asyncio.create_task(self._process_stream_results())
+                self.is_streaming = True
 
             if self.stream.input_stream:
                 # AWS Transcribe has frame size limits - chunk large audio into smaller pieces
@@ -210,8 +215,7 @@ class Transcriber:
                     last_transcript_time = start_time
                     no_final_timeout = 2.0
                     
-                    print(f"Starting transcript collection (waiting up to {max_wait_time}s)...")
-                    
+                    # Removed verbose logging
                     while True:
                         remaining_time = max_wait_time - (asyncio.get_event_loop().time() - start_time)
                         if remaining_time <= 0:
@@ -221,11 +225,9 @@ class Transcriber:
                         
                         # If we have final transcripts, wait 0.5s more
                         if transcripts and (current_time - last_transcript_time > 0.5):
-                            print(f"Got final transcripts, waiting 0.5s more...")
                             await asyncio.sleep(0.5)
                             break
                         elif partial_transcript and not transcripts and (current_time - start_time > no_final_timeout):
-                            print(f"No final transcripts after {no_final_timeout}s, will use partial")
                             break
                         
                         try:
@@ -239,12 +241,12 @@ class Transcriber:
                             if transcript:
                                 if is_partial:
                                     partial_transcript = transcript
-                                    print(f"Partial transcript: {transcript}")
+                                    # Don't log partial transcripts to reduce noise
                                 else:
                                     transcripts.append(transcript)
                                     partial_transcript = None
                                     last_transcript_time = asyncio.get_event_loop().time()
-                                    print(f"Final transcript: {transcript}")
+                                    # Final transcripts will be logged at the end
                         except asyncio.TimeoutError:
                             if transcripts:
                                 if (asyncio.get_event_loop().time() - last_transcript_time) > 0.5:
@@ -263,16 +265,13 @@ class Transcriber:
                 # Send audio frames
                 try:
                     if len(audio_chunk) > max_frame_size:
-                        print(f"Large audio chunk ({len(audio_chunk)} bytes), splitting into frames...")
+                        # Split large chunks silently
                         for i in range(0, len(audio_chunk), max_frame_size):
                             chunk_frame = audio_chunk[i:i+max_frame_size]
                             await self.stream.input_stream.send_audio_event(audio_chunk=chunk_frame)
                             await asyncio.sleep(0.05)  # Small delay between frames
-                        print(f"All {len(audio_chunk)} bytes sent to AWS Transcribe")
                     else:
-                        print(f"Sending {len(audio_chunk)} bytes to AWS Transcribe")
                         await self.stream.input_stream.send_audio_event(audio_chunk=audio_chunk)
-                        print(f"Audio chunk sent successfully")
                 except Exception as send_error:
                     error_msg = str(send_error).lower()
                     if "timeout" in error_msg or "no new audio" in error_msg:

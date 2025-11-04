@@ -92,9 +92,11 @@ Here is Uttam's professional background:
 
 {resume_content}
 
-When asked about Uttam, his experience, skills, background, or any professional questions, provide accurate and helpful responses based on the information above. For general questions, provide helpful assistance."""
+IMPORTANT INSTRUCTIONS:
+- When asked about Uttam, his experience, skills, background, qualifications, or any questions about him personally or professionally, scan and use the resume information above to provide accurate and helpful responses.
+- For all other questions (general questions, current events, news, technology, etc.), provide normal helpful assistance using your knowledge. Answer general questions naturally without referencing the resume unless specifically asked about Uttam."""
             else:
-                system_prompt = "You are a helpful assistant."
+                system_prompt = "You are a helpful assistant that can answer questions about current events, news, technology, and general topics."
         # If client is None, try to reinitialize one more time
         if not self.client:
             print("LLM: Client is None, attempting to reinitialize...")
@@ -124,7 +126,6 @@ When asked about Uttam, his experience, skills, background, or any professional 
                 return error_msg
         
         try:
-            print(f"LLM: Sending request to OpenAI with text: {text[:50]}...")
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -132,14 +133,12 @@ When asked about Uttam, his experience, skills, background, or any professional 
                     {"role": "user", "content": text}
                 ],
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=50  # Reduced for very short, concise responses
             )
             if response.choices and len(response.choices) > 0:
                 result = response.choices[0].message.content
-                print(f"LLM: Received response: {result[:50] if result else 'None'}...")
                 return result
             else:
-                print("LLM: No response choices returned")
                 return None
         except Exception as e:
             print(f"LLM: Error processing text with LLM: {type(e).__name__}: {e}")

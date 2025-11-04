@@ -77,17 +77,23 @@ class AudioPlayer:
     """Plays audio responses from server using sounddevice"""
     def __init__(self):
         self.response_audio = b''
+        self.is_playing = False  # Flag to prevent multiple simultaneous playback
         
     def add_audio(self, audio_bytes):
         """Add audio bytes to buffer"""
         self.response_audio += audio_bytes
         
     def play(self):
-        """Play accumulated audio"""
+        """Play accumulated audio (only if not already playing)"""
         if len(self.response_audio) == 0:
+            return
+        
+        if self.is_playing:
+            print("⚠️  Already playing audio, skipping duplicate playback")
             return
             
         print(f"\n🔊 Playing response ({len(self.response_audio)} bytes)...")
+        self.is_playing = True
         
         try:
             # Convert bytes to numpy array
@@ -100,10 +106,12 @@ class AudioPlayer:
             
             print("✅ Finished playing response\n")
             
-            # Clear buffer
-            self.response_audio = b''
         except Exception as e:
             print(f"Error playing audio: {e}")
+        finally:
+            # Always clear buffer and flag
+            self.response_audio = b''
+            self.is_playing = False
             
     def cleanup(self):
         """Cleanup audio resources"""
@@ -143,16 +151,19 @@ async def mic_client():
                 async def receive_loop():
                     nonlocal audio_response
                     consecutive_timeouts = 0
-                    max_consecutive_timeouts = 3
+                    max_consecutive_timeouts = 5  # Increased to wait longer
                     last_audio_time = None
+                    chunk_received = False  # Track if we've received any chunks in this response
                     
                     while not shutdown_requested:
                         try:
-                            timeout = 1.0 if not sending_complete.is_set() else 5.0
+                            # Use longer timeout to wait for complete responses
+                            timeout = 3.0 if not sending_complete.is_set() else 8.0  # Increased from 1.0/5.0
                             response = await asyncio.wait_for(websocket.recv(), timeout=timeout)
                             
                             consecutive_timeouts = 0
                             last_audio_time = asyncio.get_event_loop().time()
+                            chunk_received = True
                             
                             if isinstance(response, str):
                                 response = response.encode()
@@ -160,30 +171,36 @@ async def mic_client():
                             audio_response += bytes(response)
                             print(f"📥 Received {len(response)} bytes of audio response (total: {len(audio_response)} bytes)")
                             
-                            # If we've accumulated a significant chunk of audio (e.g., > 32KB),
-                            # or if no new audio for 0.5s, play it immediately
-                            if len(audio_response) > 32768:  # 32KB threshold
-                                print(f"🎵 Playing accumulated audio ({len(audio_response)} bytes)...")
-                                if not shutdown_requested:
-                                    player.add_audio(audio_response)
-                                    player.play()
-                                    audio_response = b''
-                                else:
-                                    audio_response = b''
+                            # Don't play immediately - wait for complete response
+                            # Only play if we've received a very large amount (>128KB) which suggests it's complete
+                            if len(audio_response) > 131072:  # 128KB threshold (was 32KB)
+                                print(f"📦 Large response accumulated ({len(audio_response)} bytes), waiting for completion...")
                             
                         except asyncio.TimeoutError:
                             consecutive_timeouts += 1
                             
-                            # If we have audio and no new audio for 1 second, play it
-                            if audio_response and last_audio_time:
+                            # If we have audio and no new audio for 2.5 seconds, play it
+                            # Increased from 1.0s to 2.5s to wait for all chunks
+                            if audio_response and last_audio_time and not player.is_playing:
                                 time_since_last = asyncio.get_event_loop().time() - last_audio_time
-                                if time_since_last > 1.0:
-                                    print(f"🎵 No new audio for {time_since_last:.1f}s, playing accumulated audio ({len(audio_response)} bytes)...")
+                                if time_since_last > 2.5:  # Wait 2.5 seconds after last chunk
+                                    print(f"🎵 No new audio for {time_since_last:.1f}s, playing complete response ({len(audio_response)} bytes)...")
                                     if not shutdown_requested:
                                         player.add_audio(audio_response)
                                         player.play()
                                         audio_response = b''
                                         last_audio_time = None
+                                        chunk_received = False
+                            
+                            # Also check if we stopped sending and have audio (but only if not already playing)
+                            if sending_complete.is_set() and audio_response and not player.is_playing:
+                                if not chunk_received or consecutive_timeouts >= 2:  # Wait 2 timeouts after sending stops
+                                    print(f"🎵 Sending complete, playing final response ({len(audio_response)} bytes)...")
+                                    if not shutdown_requested:
+                                        player.add_audio(audio_response)
+                                        player.play()
+                                        audio_response = b''
+                                    break
                             
                             if sending_complete.is_set() and consecutive_timeouts >= max_consecutive_timeouts:
                                 break
@@ -198,14 +215,30 @@ async def mic_client():
                                 print(f"Error receiving: {e}")
                                 break
                     
-                    # Play any remaining accumulated response if not shutting down
-                    if audio_response and not shutdown_requested:
+                    # Play any remaining accumulated response if not shutting down and not already playing
+                    # Wait a bit more in case there are final chunks arriving
+                    if audio_response and not shutdown_requested and not player.is_playing:
+                        # Give a final chance for any remaining chunks
+                        try:
+                            await asyncio.sleep(0.5)  # Brief wait for any final chunks
+                            # Try to receive one more chunk quickly
+                            try:
+                                final_chunk = await asyncio.wait_for(websocket.recv(), timeout=0.5)
+                                if isinstance(final_chunk, str):
+                                    final_chunk = final_chunk.encode()
+                                audio_response += bytes(final_chunk)
+                                print(f"📥 Received final chunk: {len(final_chunk)} bytes")
+                            except (asyncio.TimeoutError, Exception):
+                                pass  # No more chunks, proceed to play
+                        except Exception:
+                            pass
+                        
                         print(f"🎵 Playing final accumulated audio ({len(audio_response)} bytes)...")
                         player.add_audio(audio_response)
                         player.play()
                         audio_response = b''
                     elif audio_response:
-                        print(f"⚠️  Discarding {len(audio_response)} bytes of audio (shutdown)")
+                        print(f"⚠️  Discarding {len(audio_response)} bytes of audio (shutdown or already playing)")
                         audio_response = b''
                 
                 receive_task = asyncio.create_task(receive_loop())

@@ -47,33 +47,52 @@ async def connect_handler(websocket, path):
     silence_threshold = 2000  # Amplitude threshold (higher = filters more background noise)
     min_audio_duration = 0.5  # Minimum audio duration to process (seconds)
     process_task = None
+    is_processing = False  # Flag to prevent multiple simultaneous processing
 
     async def process_on_pause():
         """Process accumulated audio after continuous silence"""
-        nonlocal audio_buffer, silence_buffer, last_sound_time
+        nonlocal audio_buffer, silence_buffer, last_sound_time, is_processing
         
         # Wait for pause threshold
         await asyncio.sleep(pause_detection_threshold)
         
-        # Double-check: if no new audio arrived, process
+        # Double-check: if no new audio arrived and we're not already processing, process
         current_time = time.time()
         if last_sound_time and (current_time - last_sound_time) >= pause_detection_threshold:
+            # Check if already processing to avoid duplicate processing
+            if is_processing:
+                print("Already processing, skipping duplicate pause detection")
+                return
+            
             # Check minimum audio duration
             audio_duration = len(audio_buffer) / (sample_rate * 2)  # 2 bytes per sample
             
             if len(audio_buffer) > 0 and audio_duration >= min_audio_duration:
+                is_processing = True  # Set flag to prevent duplicate processing
                 print(f"Pause detected (1.5s silence), processing {len(audio_buffer)} bytes ({audio_duration:.2f}s)...")
                 accumulated_audio = audio_buffer
                 audio_buffer = b''  # Clear buffer
                 silence_buffer = b''
                 
-                # Process audio through Transcribe -> LLM -> Polly pipeline
-                processed_chunk = await process_audio_async(accumulated_audio)
-                
-                # Send processed chunk back
-                if processed_chunk and len(processed_chunk) > 0:
-                    await websocket.send(processed_chunk)
-                    print(f"Sent complete response: {len(processed_chunk)} bytes")
+                try:
+                    # Process audio through Transcribe -> LLM -> Polly pipeline
+                    processed_chunk = await process_audio_async(accumulated_audio)
+                    
+                    # Send processed chunk back (chunk if large)
+                    if processed_chunk and len(processed_chunk) > 0:
+                        max_chunk_size = 512 * 1024  # 512KB chunks
+                        if len(processed_chunk) > max_chunk_size:
+                            print(f"Large response ({len(processed_chunk)} bytes), splitting into chunks...")
+                            total_chunks = (len(processed_chunk) + max_chunk_size - 1) // max_chunk_size
+                            for i in range(0, len(processed_chunk), max_chunk_size):
+                                chunk = processed_chunk[i:i + max_chunk_size]
+                                await websocket.send(chunk)
+                                print(f"Sent chunk {i // max_chunk_size + 1}/{total_chunks}: {len(chunk)} bytes")
+                        else:
+                            await websocket.send(processed_chunk)
+                            print(f"Sent complete response: {len(processed_chunk)} bytes")
+                finally:
+                    is_processing = False  # Clear flag after processing completes
             elif len(audio_buffer) > 0:
                 print(f"Audio too short ({audio_duration:.2f}s < {min_audio_duration}s), ignoring...")
                 audio_buffer = b''
@@ -109,7 +128,20 @@ async def connect_handler(websocket, path):
                     if len(audio_buffer) > 0 and silence_duration >= pause_detection_threshold:
                         audio_duration = len(audio_buffer) / (sample_rate * 2)
                         
+                        # Check if already processing to avoid duplicate processing
+                        if is_processing:
+                            print("Already processing, skipping duplicate silence detection")
+                            # Continue accumulating silence, cancel any pending timeout
+                            if process_task and not process_task.done():
+                                process_task.cancel()
+                                try:
+                                    await process_task
+                                except asyncio.CancelledError:
+                                    pass
+                            continue
+                        
                         if audio_duration >= min_audio_duration:
+                            is_processing = True  # Set flag to prevent duplicate processing
                             print(f"Silence detected ({silence_duration:.2f}s), processing {len(audio_buffer)} bytes...")
                             
                             accumulated_audio = audio_buffer
@@ -128,8 +160,18 @@ async def connect_handler(websocket, path):
                             try:
                                 processed_chunk = await process_audio_async(accumulated_audio)
                                 if processed_chunk and len(processed_chunk) > 0:
-                                    await websocket.send(processed_chunk)
-                                    print(f"Sent complete response: {len(processed_chunk)} bytes")
+                                    # Split large responses into chunks to avoid WebSocket message size limits (typically 1MB)
+                                    max_chunk_size = 512 * 1024  # 512KB chunks
+                                    if len(processed_chunk) > max_chunk_size:
+                                        print(f"Large response ({len(processed_chunk)} bytes), splitting into chunks...")
+                                        total_chunks = (len(processed_chunk) + max_chunk_size - 1) // max_chunk_size
+                                        for i in range(0, len(processed_chunk), max_chunk_size):
+                                            chunk = processed_chunk[i:i + max_chunk_size]
+                                            await websocket.send(chunk)
+                                            print(f"Sent chunk {i // max_chunk_size + 1}/{total_chunks}: {len(chunk)} bytes")
+                                    else:
+                                        await websocket.send(processed_chunk)
+                                        print(f"Sent complete response: {len(processed_chunk)} bytes")
                             except Exception as process_error:
                                 error_type = type(process_error).__name__
                                 if "ConnectionClosed" in error_type:
@@ -140,6 +182,8 @@ async def connect_handler(websocket, path):
                                     import traceback
                                     traceback.print_exc()
                                     # Continue - don't close connection on processing errors
+                            finally:
+                                is_processing = False  # Clear flag after processing completes
                         else:
                             print(f"Audio too short ({audio_duration:.2f}s), continuing to accumulate...")
                     else:
@@ -184,7 +228,18 @@ async def connect_handler(websocket, path):
             try:
                 processed_chunk = await process_audio_async(audio_buffer)
                 if processed_chunk and len(processed_chunk) > 0:
-                    await websocket.send(processed_chunk)
+                    # Split large responses into chunks
+                    max_chunk_size = 512 * 1024  # 512KB chunks
+                    if len(processed_chunk) > max_chunk_size:
+                        print(f"Large final response ({len(processed_chunk)} bytes), splitting into chunks...")
+                        total_chunks = (len(processed_chunk) + max_chunk_size - 1) // max_chunk_size
+                        for i in range(0, len(processed_chunk), max_chunk_size):
+                            chunk = processed_chunk[i:i + max_chunk_size]
+                            await websocket.send(chunk)
+                            print(f"Sent final chunk {i // max_chunk_size + 1}/{total_chunks}: {len(chunk)} bytes")
+                    else:
+                        await websocket.send(processed_chunk)
+                        print(f"Sent final response: {len(processed_chunk)} bytes")
             except Exception as final_error:
                 error_type = type(final_error).__name__
                 if "ConnectionClosed" not in error_type:
@@ -222,7 +277,9 @@ async def main():
         WEBSOCKET_PORT,
         ping_interval=30,  # Send ping every 30 seconds
         ping_timeout=60,   # Wait 60 seconds for pong response
-        close_timeout=10   # Close timeout
+        close_timeout=10,  # Close timeout
+        max_size=None,     # Disable message size limit (we'll chunk manually)
+        max_queue=32       # Queue size for messages
     )
     print(f"WebSocket server listening on {WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
     await server.wait_closed()
